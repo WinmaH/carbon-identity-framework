@@ -72,7 +72,14 @@ public class JsAuthenticationContext extends AbstractJSObjectWrapper<Authenticat
             case FrameworkConstants.JSAttributes.JS_CURRENT_STEP:
                 return new JsStep(getContext(), getContext().getCurrentStep(), getAuthenticatedIdPOfCurrentStep());
             case FrameworkConstants.JSAttributes.JS_CURRENT_KNOWN_SUBJECT:
-                return new JsAuthenticatedUser(getCurrentSubject());
+                AuthenticatedUser currentSubject = getCurrentSubject();
+                if (currentSubject != null) {
+                    return new JsAuthenticatedUser(this.getContext(), currentSubject);
+                } else {
+                    return null;
+                }
+            case FrameworkConstants.JSAttributes.JS_RETRY_STEP:
+                return getWrapped().isRetrying();
             default:
                 return super.getMember(name);
         }

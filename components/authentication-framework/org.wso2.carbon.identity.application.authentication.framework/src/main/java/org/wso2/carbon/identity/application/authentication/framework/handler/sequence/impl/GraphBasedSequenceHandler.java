@@ -41,7 +41,7 @@ import org.wso2.carbon.identity.application.authentication.framework.config.mode
 import org.wso2.carbon.identity.application.authentication.framework.config.model.graph.ShowPromptNode;
 import org.wso2.carbon.identity.application.authentication.framework.config.model.graph.StepConfigGraphNode;
 import org.wso2.carbon.identity.application.authentication.framework.config.model.graph.js.JsAuthenticationContext;
-import org.wso2.carbon.identity.application.authentication.framework.config.model.graph.js.JsParameters;
+import org.wso2.carbon.identity.application.authentication.framework.config.model.graph.js.JsWritableParameters;
 import org.wso2.carbon.identity.application.authentication.framework.context.AuthenticationContext;
 import org.wso2.carbon.identity.application.authentication.framework.exception.FrameworkException;
 import org.wso2.carbon.identity.application.authentication.framework.exception.JsFailureException;
@@ -56,15 +56,12 @@ import org.wso2.carbon.identity.application.mgt.ApplicationConstants;
 import org.wso2.carbon.identity.core.util.IdentityTenantUtil;
 import org.wso2.carbon.identity.core.util.IdentityUtil;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.Map;
-import java.util.zip.Deflater;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -95,7 +92,8 @@ public class GraphBasedSequenceHandler extends DefaultStepBasedSequenceHandler i
         String authenticationType = sequenceConfig.getApplicationConfig().getServiceProvider()
             .getLocalAndOutBoundAuthenticationConfig().getAuthenticationType();
         AuthenticationGraph graph = sequenceConfig.getAuthenticationGraph();
-        if (graph == null || !graph.isEnabled() || !ApplicationConstants.AUTH_TYPE_FLOW.equals(authenticationType)) {
+        if (graph == null || !graph.isEnabled() || (!ApplicationConstants.AUTH_TYPE_FLOW.equals(authenticationType) &&
+                !ApplicationConstants.AUTH_TYPE_DEFAULT.equals(authenticationType))) {
             //Handle pre-configured step array
             if (log.isDebugEnabled()) {
                 log.debug("Authentication Graph not defined for the application. "
@@ -397,7 +395,9 @@ public class GraphBasedSequenceHandler extends DefaultStepBasedSequenceHandler i
             }
             return true;
         }
-
+        if (context.isPassiveAuthenticate() && !context.isRequestAuthenticated()) {
+            return true;
+        }
         context.setReturning(false);
         return false;
     }
@@ -522,7 +522,15 @@ public class GraphBasedSequenceHandler extends DefaultStepBasedSequenceHandler i
                     executeFunction("onSuccess", dynamicDecisionNode, context);
                     break;
                 case FAIL_COMPLETED:
-                    executeFunction("onFail", dynamicDecisionNode, context);
+                    if (dynamicDecisionNode.getFunctionMap().get("onFail") != null) {
+                        executeFunction("onFail", dynamicDecisionNode, context);
+                    } else {
+                        if (context.isRetrying()) {
+                            AuthGraphNode nextNode = dynamicDecisionNode.gerParent();
+                            context.setProperty(FrameworkConstants.JSAttributes.PROP_CURRENT_NODE, nextNode);
+                            return;
+                        }
+                    }
                     if (dynamicDecisionNode.getDefaultEdge() instanceof EndStep) {
                         dynamicDecisionNode.setDefaultEdge(new FailNode());
                     }
@@ -565,7 +573,7 @@ public class GraphBasedSequenceHandler extends DefaultStepBasedSequenceHandler i
                 .getSequenceConfig().getAuthenticationGraph().getStepMap(), dynamicDecisionNode);
         JsGraphBuilder.JsBasedEvaluator jsBasedEvaluator = jsGraphBuilder.new JsBasedEvaluator(fn);
         jsBasedEvaluator.evaluate(context,
-                (jsConsumer) -> jsConsumer.call(null, new JsAuthenticationContext(context), new JsParameters(data)));
+                (jsConsumer) -> jsConsumer.call(null, new JsAuthenticationContext(context), new JsWritableParameters(data)));
         if (dynamicDecisionNode.getDefaultEdge() == null) {
             dynamicDecisionNode.setDefaultEdge(new EndStep());
         }
